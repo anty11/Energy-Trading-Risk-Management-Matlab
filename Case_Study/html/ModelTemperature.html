@@ -1,0 +1,269 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML is auto-generated from an M-file.
+To make changes, update the M-file and republish this document.
+      --><title>Modeling &amp; Simulating Hourly Temperature</title><meta name="generator" content="MATLAB 7.10"><meta name="date" content="2010-06-28"><meta name="m-file" content="ModelTemperature"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h1>Modeling &amp; Simulating Hourly Temperature</h1><!--introduction--><p>This example demonstrates fitting a non-linear temperature model to hourly dry bulb temperatures recorded in the New England region. The temperature series is modeled as a sum of two compoments, a deterministic non-linear function that explains the seasonal or expected temperature for a given hour in a given year and a stochastic component that explains deviations of actual temperature from average values.</p><!--/introduction--><h2>Contents</h2><div><ul><li><a href="#1">Import Data</a></li><li><a href="#2">Seasonal Component (Deterministic)</a></li><li><a href="#3">Visualize Model Accuracy</a></li><li><a href="#4">Analyze Serial Correlation in Residuals</a></li><li><a href="#5">Modeling the Stochastic Component with a seasonal AR model</a></li><li><a href="#6">Analyze Residuals of Regression for Serial Correlation</a></li><li><a href="#7">Fit a Distribution to Residuals</a></li><li><a href="#8">Summary of model</a></li><li><a href="#9">Simulate model</a></li></ul></div><h2>Import Data<a name="1"></a></h2><p>The data set is loaded from a previously created MAT-file. It consist of a vector of serial dates and the corresponding historical recorded temperature.</p><pre class="codeinput">clear
+load <span class="string">Data\TempSeries</span>
+whos
+</pre><pre class="codeoutput">  Name             Size             Bytes  Class     Attributes
+
+  dates        52608x1             420864  double              
+  drybulb      52608x1             420864  double              
+
+</pre><h2>Seasonal Component (Deterministic)<a name="2"></a></h2><p>The deterministic or expected temperature component is modeled with a sum of sines model, motivated by the physical nature of temperature and periodicities observed in the data. Curve Fitting toolbox is used to estimate the parameters of the model. The Statistics Toolbox function NLINFIT can also be used to estimate the model parameters.</p><pre class="codeinput"><span class="comment">% Compute mean (yearly average) and remove it from the series</span>
+m = mean(drybulb)
+drybulb0 = drybulb - m;
+
+<span class="comment">% Fit double-sine model</span>
+model = fit(dates, drybulb0, <span class="string">'sin2'</span>)
+</pre><pre class="codeoutput">
+m =
+
+       49.872
+
+
+model = 
+
+     General model Sin2:
+     model(x) =  a1*sin(b1*x+c1) + a2*sin(b2*x+c2)
+     Coefficients (with 95% confidence bounds):
+       a1 =       22.79  (22.7, 22.89)
+       b1 =     0.01721  (0.01721, 0.01722)
+       c1 =      -9.746  (-14.65, -4.84)
+       a2 =       5.698  (5.602, 5.795)
+       b2 =       6.283  (6.283, 6.283)
+       c2 =       67.32  (47.76, 86.88)
+</pre><h2>Visualize Model Accuracy<a name="3"></a></h2><p>Analyze the fit results visually with a custom plot. The two axes in the plots are linked which greatly enables visual exploration of the data. Also note that the date ticks on the X-axes are dynamic with respect to zooming and panning.</p><pre class="codeinput">pred = model(dates) + m;
+res = drybulb - pred;
+fitPlot(dates, [drybulb pred], res);
+disp([<span class="string">'Mean Absolute Error: '</span> num2str(mean(abs(res))) <span class="string">' degrees F'</span>]);
+</pre><pre class="codeoutput">Mean Absolute Error: 6.1744 degrees F
+</pre><img vspace="5" hspace="5" src="ModelTemperature_01.png" alt=""> <h2>Analyze Serial Correlation in Residuals<a name="4"></a></h2><p>One of the features apparent in the above plot is that the residuals are not serially correlated. This is expected as above average temperatures are likely to follow above average temperatures. This serial correlation can be explicitly measured. Here, the functions AUTOCORR and PARCORR are used to display the autocorrelation and partial autocorrelation in the series.</p><pre class="codeinput">figure;
+subplot(2,1,1);
+autocorr(res,50);
+title(<span class="string">'Serial Correlation of Stochastic series'</span>);
+subplot(2,1,2);
+parcorr(res(1:1000),50);
+</pre><img vspace="5" hspace="5" src="ModelTemperature_02.png" alt=""> <h2>Modeling the Stochastic Component with a seasonal AR model<a name="5"></a></h2><p>One could choose to model the random component a mean reverting drift SDE. However, because of the seasonality, we will use an auto-regressive model with seasonal lags. The MATLAB backslash operator can be used here instead of the REGRESS function, but this will not return confidence intervals.</p><pre class="codeinput">lags = [1 2 3 4 23 24 25 47 48 49];
+Xres = lagmatrix(res, lags);
+[beta, betaci, res2] = regress(res, Xres);
+disp(<span class="string">'Lags Coefficients and Confidence Intervals'</span>);
+disp([lags' beta betaci])
+</pre><pre class="codeoutput">Lags Coefficients and Confidence Intervals
+            1       1.2931       1.2847       1.3016
+            2     -0.13272     -0.14654      -0.1189
+            3     -0.18626         -0.2     -0.17251
+            4    0.0044918   -0.0037637     0.012747
+           23      0.12228      0.11394      0.13062
+           24    0.0010838    -0.012706     0.014874
+           25     -0.12824      -0.1367     -0.11977
+           47     0.066489      0.05817     0.074808
+           48     0.023581    0.0098334     0.037329
+           49     -0.08112    -0.089443    -0.072797
+
+</pre><h2>Analyze Residuals of Regression for Serial Correlation<a name="6"></a></h2><p>The residuals from the regression should now be mostly serially uncorrelated.</p><pre class="codeinput">figure;
+subplot(2,1,1);
+plot(dates, res2); datetick
+title(<span class="string">'Regression Residuals &amp; Their Serial Correlation'</span>);
+subplot(2,1,2);
+autocorr(res2(lags(end)+1:end),50);
+</pre><img vspace="5" hspace="5" src="ModelTemperature_03.png" alt=""> <h2>Fit a Distribution to Residuals<a name="7"></a></h2><p>Since the residuals are mostly uncorrelated, they can be modeled as independent draws from an appropriate distribution. A t-location-scale distribution can be shown to provide a good fit.</p><pre class="codeinput">PD = fitdist(res2, <span class="string">'tlocationscale'</span>);
+</pre><h2>Summary of model<a name="8"></a></h2><p>The temperature model can now be defined by,</p><div><ul><li>The mean temperature "m"</li><li>The sinusoidal model "model"</li><li>Regression parameters "beta"</li><li>Autocorrelation lags "lags"</li><li>The residual probability distribution "PD"</li><li>Optional presample data (the last observations of temperature for regression)</li></ul></div><pre class="codeinput">tempModel = struct(<span class="string">'m'</span>, m, <span class="string">'sinmodel'</span>, model, <span class="string">'reglags'</span>, lags, <span class="string">'regbeta'</span>, beta, <span class="string">'dist'</span>, PD, <span class="string">'presample'</span>, res(end-lags(end)+1:end));
+save <span class="string">SavedModels\TemperatureModel.mat</span> <span class="string">-struct</span> <span class="string">tempModel</span>
+clearvars <span class="string">-except</span> <span class="string">tempModel</span> <span class="string">dates</span> <span class="string">drybulb</span>
+</pre><h2>Simulate model<a name="9"></a></h2><p>We can now simulate this model for 2009 and compare the simulated values to the observed data from 2009. Notice that we have captured the relevant features in our model.</p><pre class="codeinput">newDates = dates(end-365*24+1:end);
+simTemp = simulateTemperature(tempModel, newDates, 1);
+
+<span class="comment">% Plot simulation results</span>
+ax1 = subplot(2,1,1);
+plot(newDates, drybulb(end-365*24+1:end))
+title(<span class="string">'Actual Temperatures'</span>);
+ax2 = subplot(2,1,2);
+plot(newDates, simTemp);
+title(<span class="string">'Simulated Temperatures'</span>);
+linkaxes([ax1 ax2], <span class="string">'x'</span>);
+dynamicDateTicks([ax1 ax2], <span class="string">'linked'</span>);
+</pre><img vspace="5" hspace="5" src="ModelTemperature_04.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.10<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Modeling & Simulating Hourly Temperature
+% This example demonstrates fitting a non-linear temperature model to
+% hourly dry bulb temperatures recorded in the New England region. The
+% temperature series is modeled as a sum of two compoments, a deterministic
+% non-linear function that explains the seasonal or expected temperature for
+% a given hour in a given year and a stochastic component that explains
+% deviations of actual temperature from average values. 
+
+%% Import Data
+% The data set is loaded from a previously created MAT-file. It consist of
+% a vector of serial dates and the corresponding historical recorded
+% temperature.
+
+clear
+load Data\TempSeries
+whos
+
+%% Seasonal Component (Deterministic)
+% The deterministic or expected temperature component is modeled with a sum
+% of sines model, motivated by the physical nature of temperature and
+% periodicities observed in the data. Curve Fitting toolbox is used to
+% estimate the parameters of the model. The Statistics Toolbox function
+% NLINFIT can also be used to estimate the model parameters.
+
+% Compute mean (yearly average) and remove it from the series
+m = mean(drybulb)
+drybulb0 = drybulb - m;
+
+% Fit double-sine model
+model = fit(dates, drybulb0, 'sin2')
+
+%% Visualize Model Accuracy
+% Analyze the fit results visually with a custom plot. The two axes in the
+% plots are linked which greatly enables visual exploration of the data.
+% Also note that the date ticks on the X-axes are dynamic with respect to
+% zooming and panning.
+pred = model(dates) + m;
+res = drybulb - pred;
+fitPlot(dates, [drybulb pred], res);
+disp(['Mean Absolute Error: ' num2str(mean(abs(res))) ' degrees F']);
+
+%% Analyze Serial Correlation in Residuals
+% One of the features apparent in the above plot is that the residuals are
+% not serially correlated. This is expected as above average temperatures
+% are likely to follow above average temperatures. This serial correlation
+% can be explicitly measured. Here, the functions AUTOCORR and PARCORR are
+% used to display the autocorrelation and partial autocorrelation in the
+% series.
+
+figure;
+subplot(2,1,1);
+autocorr(res,50);
+title('Serial Correlation of Stochastic series');
+subplot(2,1,2);
+parcorr(res(1:1000),50);
+
+
+%% Modeling the Stochastic Component with a seasonal AR model
+% One could choose to model the random component a mean reverting drift
+% SDE. However, because of the seasonality, we will use an auto-regressive
+% model with seasonal lags. The MATLAB backslash operator can be used
+% here instead of the REGRESS function, but this will not return confidence
+% intervals.
+
+lags = [1 2 3 4 23 24 25 47 48 49];
+Xres = lagmatrix(res, lags);
+[beta, betaci, res2] = regress(res, Xres);
+disp('Lags Coefficients and Confidence Intervals');
+disp([lags' beta betaci])
+
+%% Analyze Residuals of Regression for Serial Correlation
+% The residuals from the regression should now be mostly serially
+% uncorrelated. 
+
+figure;
+subplot(2,1,1);
+plot(dates, res2); datetick
+title('Regression Residuals & Their Serial Correlation');
+subplot(2,1,2);
+autocorr(res2(lags(end)+1:end),50);
+
+%% Fit a Distribution to Residuals
+% Since the residuals are mostly uncorrelated, they can be modeled as
+% independent draws from an appropriate distribution. A t-location-scale
+% distribution can be shown to provide a good fit. 
+
+PD = fitdist(res2, 'tlocationscale');
+
+%% Summary of model
+% The temperature model can now be defined by,
+% 
+% * The mean temperature "m"
+% * The sinusoidal model "model"
+% * Regression parameters "beta"
+% * Autocorrelation lags "lags"
+% * The residual probability distribution "PD"
+% * Optional presample data (the last observations of temperature for regression)
+
+tempModel = struct('m', m, 'sinmodel', model, 'reglags', lags, 'regbeta', beta, 'dist', PD, 'presample', res(end-lags(end)+1:end));
+save SavedModels\TemperatureModel.mat -struct tempModel
+clearvars -except tempModel dates drybulb
+
+%% Simulate model
+% We can now simulate this model for 2009 and compare the simulated values
+% to the observed data from 2009. Notice that we have captured the relevant
+% features in our model.
+
+newDates = dates(end-365*24+1:end);
+simTemp = simulateTemperature(tempModel, newDates, 1);
+
+% Plot simulation results
+ax1 = subplot(2,1,1);
+plot(newDates, drybulb(end-365*24+1:end))
+title('Actual Temperatures');
+ax2 = subplot(2,1,2);
+plot(newDates, simTemp);
+title('Simulated Temperatures');
+linkaxes([ax1 ax2], 'x');
+dynamicDateTicks([ax1 ax2], 'linked');
+##### SOURCE END #####
+--></body></html>

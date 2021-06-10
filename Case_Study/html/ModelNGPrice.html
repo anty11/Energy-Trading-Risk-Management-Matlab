@@ -1,0 +1,282 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML is auto-generated from an M-file.
+To make changes, update the M-file and republish this document.
+      --><title>Calibrating &amp; Simulating Natural Gas Spot Prices</title><meta name="generator" content="MATLAB 7.10"><meta name="date" content="2010-06-28"><meta name="m-file" content="ModelNGPrice"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h1>Calibrating &amp; Simulating Natural Gas Spot Prices</h1><!--introduction--><p>This example demonstrates calibrating an Ornstein-Uhlenbeck mean reverting stochastic model from historical data of natural gas prices. The model is then used to simulate the spot prices into the future using the Stochastic Differential Equation Simulation engine in Econometrics Toolbox.</p><!--/introduction--><h2>Contents</h2><div><ul><li><a href="#1">Import Historical Data</a></li><li><a href="#2">The Model</a></li><li><a href="#3">Calibrate Parameters</a></li><li><a href="#4">Create an Ornstein-Uhlenbeck mean reverting drift model</a></li><li><a href="#5">Monte-Carlo Simulation</a></li><li><a href="#6">Save Model</a></li><li><a href="#7">Visual Analysis of Simulated Price Paths</a></li><li><a href="#8">Automated Visualization for Calibration Report</a></li></ul></div><h2>Import Historical Data<a name="1"></a></h2><p>The data can either be imported from a MAT-file or from the database using the auto-generated fetch function. The data set contains spot prices for natural gas at Henry Hub from 2000 to 2008</p><pre class="codeinput">clear
+data = fetchNGData
+S = data.NaturalGas;
+</pre><pre class="codeoutput">
+data = 
+
+          Date: [2676x1 double]
+    NaturalGas: [2676x1 double]
+      CrudeOil: [2676x1 double]
+       FuelOil: [2676x1 double]
+
+</pre><h2>The Model<a name="2"></a></h2><p>The model used for simulating the Natural Gas prices is an Ornstein-Uhlenbeck brownian motion with mean reverting drift. This model is fit to the log of natural gas prices. The discrete-time equation of this model can be written as,</p><p><img src="ModelNGPrice_eq13650.png" alt="$$ \Delta x_t = \alpha(\mu - x_t)\Delta t + \sigma dz_t, \textrm{ where } dz_t \sim N(0, \sqrt\Delta_t) $$"></p><p><img src="ModelNGPrice_eq59128.png" alt="$$ \alpha = \textrm{ Mean Reversion Rate}$$"></p><p><img src="ModelNGPrice_eq73175.png" alt="$$ \mu = \textrm{ Mean level} $$"></p><p><img src="ModelNGPrice_eq77348.png" alt="$$ \sigma = \textrm { Volatility } $$"></p><p>This model can be calibrated to historical data by performing a linear regression between log prices and their first difference. Specifically, the equation can be rewritten as,</p><p><img src="ModelNGPrice_eq60877.png" alt="$$ \frac{\Delta x_t}{\Delta t} = - \alpha x_t + \alpha\mu + \frac{\sigma}{\Delta t} dz_t $$"></p><h2>Calibrate Parameters<a name="3"></a></h2><p>The reversion rate and mean level can be calculated from the coefficients of a linear fit between the log prices and their first difference scaled by the time interval parameter. All quantities are specified on an annual scale.</p><pre class="codeinput">x = log(S);
+dx = diff(x);
+dt = 1/261; <span class="comment">% Time in years (261 observations per year)</span>
+dxdt = dx/dt;
+x(end) = []; <span class="comment">% To ensure the number of elements in x and dxdt match</span>
+
+<span class="comment">% Fit a linear trend to estimate mean reversion parameters</span>
+coeff = polyfit(x, dxdt, 1);
+res = dxdt - polyval(coeff, x);
+
+revRate   = -coeff(1)
+meanLevel = coeff(2)/revRate
+vol       = std(res) * sqrt(dt)
+</pre><pre class="codeoutput">
+revRate =
+
+       1.7696
+
+
+meanLevel =
+
+       1.7043
+
+
+vol =
+
+      0.74451
+
+</pre><h2>Create an Ornstein-Uhlenbeck mean reverting drift model<a name="4"></a></h2><p>An Ornstein-Uhlenbeck model is a special case of a Hull-White-Vasicek model with constant volatility. The HWV constructor is used to setup an SDE model with the parameters estimated above. The start state of the model is set to the last observed log spot price. This model can be easily extend to accommodate the forward curve and option prices by setting the meanLevel and volatility parameters to be functions of time.</p><pre class="codeinput">OUmodel = hwv(revRate, meanLevel, vol,  <span class="string">'StartState'</span>, x(end))
+
+<span class="comment">% Alternatively, one could equivalently use the SDEMRD object as follows</span>
+<span class="comment">% OUmodel = sdemrd(revRate, meanLevel, 0, vol, 'StartState', x(end))</span>
+</pre><pre class="codeoutput">
+OUmodel = 
+
+   Class HWV: Hull-White/Vasicek
+   ----------------------------------------
+     Dimensions: State = 1, Brownian = 1
+   ----------------------------------------
+      StartTime: 0
+     StartState: 1.31507
+    Correlation: 1
+          Drift: drift rate function F(t,X(t)) 
+      Diffusion: diffusion rate function G(t,X(t)) 
+     Simulation: simulation method/function simByEuler
+          Sigma: 0.744514
+          Level: 1.70426
+          Speed: 1.76964
+</pre><h2>Monte-Carlo Simulation<a name="5"></a></h2><p>The model defined above can be simulated with the simulate method of the SDE object to generate multiple log price paths. These are exponentiated to compute the simulated natural gas prices. The plot below shows 100 paths simulated 80 days into the future.</p><pre class="codeinput">NTrials = 1000;
+NSteps  = 2000;
+
+
+Xsim = simulate(OUmodel, NSteps, <span class="string">'NTrials'</span>, NTrials, <span class="string">'DeltaTime'</span>, dt);
+
+
+Xsim = squeeze(Xsim); <span class="comment">% Remove redundant dimension</span>
+Ssim = exp(Xsim);
+
+<span class="comment">% Visualize first 80 prices of 100 paths</span>
+plot(data.Date(end-20:end), S(end-20:end), data.Date(end)+(0:79), Ssim(1:80,1:100));
+datetick; xlabel(<span class="string">'Date'</span>); ylabel(<span class="string">'NG Spot Price'</span>);
+</pre><img vspace="5" hspace="5" src="ModelNGPrice_01.png" alt=""> <h2>Save Model<a name="6"></a></h2><p>The calibrated model is saved in a MAT-file for later use.</p><pre class="codeinput">save <span class="string">SavedModels\NGPriceModel</span> <span class="string">OUmodel</span> <span class="string">dt</span>
+</pre><h2>Visual Analysis of Simulated Price Paths<a name="7"></a></h2><p>Instead of plotting a number of paths at once, we can plot longer single paths against the observed historical data to visually validate the simulated paths. This can serve as a final sanity check.</p><pre class="codeinput">path = 14;
+plot(data.Date, data.NaturalGas, <span class="string">'b'</span>, data.Date(end)+(0:NSteps), Ssim(:,path), <span class="string">'r'</span>);
+title([<span class="string">'Historical &amp; Simulated Prices, Path '</span> int2str(path)]);
+datetick(<span class="string">'x'</span>,<span class="string">'keeplimits'</span>);
+</pre><img vspace="5" hspace="5" src="ModelNGPrice_02.png" alt=""> <h2>Automated Visualization for Calibration Report<a name="8"></a></h2><p>This section creates plots of different simulations in an automated fashion to include in the calibration report.</p><pre class="codeinput">NTrials = 12;
+NSteps  = 2000;
+Xsim = simulate(OUmodel, NSteps, <span class="string">'NTrials'</span>, NTrials, <span class="string">'DeltaTime'</span>, dt);
+Ssim = exp(Xsim);
+
+<span class="keyword">for</span> path = 1:NTrials
+    plot(data.Date, data.NaturalGas, <span class="string">'b'</span>, data.Date(end)+(0:NSteps), Ssim(:,path), <span class="string">'r'</span>);
+    title([<span class="string">'Historical &amp; Simulated Prices, Path '</span> int2str(path)]);
+    datetick
+    snapnow;
+<span class="keyword">end</span>
+
+<span class="comment">%#ok&lt;*NOPTS&gt;</span>
+</pre><img vspace="5" hspace="5" src="ModelNGPrice_03.png" alt=""> <img vspace="5" hspace="5" src="ModelNGPrice_04.png" alt=""> <img vspace="5" hspace="5" src="ModelNGPrice_05.png" alt=""> <img vspace="5" hspace="5" src="ModelNGPrice_06.png" alt=""> <img vspace="5" hspace="5" src="ModelNGPrice_07.png" alt=""> <img vspace="5" hspace="5" src="ModelNGPrice_08.png" alt=""> <img vspace="5" hspace="5" src="ModelNGPrice_09.png" alt=""> <img vspace="5" hspace="5" src="ModelNGPrice_10.png" alt=""> <img vspace="5" hspace="5" src="ModelNGPrice_11.png" alt=""> <img vspace="5" hspace="5" src="ModelNGPrice_12.png" alt=""> <img vspace="5" hspace="5" src="ModelNGPrice_13.png" alt=""> <img vspace="5" hspace="5" src="ModelNGPrice_14.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.10<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Calibrating & Simulating Natural Gas Spot Prices
+% This example demonstrates calibrating an Ornstein-Uhlenbeck mean
+% reverting stochastic model from historical data of natural gas prices.
+% The model is then used to simulate the spot prices into the future using
+% the Stochastic Differential Equation Simulation engine in Econometrics
+% Toolbox.
+
+%% Import Historical Data
+% The data can either be imported from a MAT-file or from the database using
+% the auto-generated fetch function. The data set contains spot prices for natural
+% gas at Henry Hub from 2000 to 2008
+
+clear
+data = fetchNGData
+S = data.NaturalGas;
+
+%% The Model
+% The model used for simulating the Natural Gas prices is an Ornstein-Uhlenbeck
+% brownian motion with mean reverting drift. This model is fit to the log
+% of natural gas prices. The discrete-time equation of this model can be
+% written as,
+%
+% $$ \Delta x_t = \alpha(\mu - x_t)\Delta t + \sigma dz_t, \textrm{ where } dz_t \sim N(0, \sqrt\Delta_t) $$
+% 
+% $$ \alpha = \textrm{ Mean Reversion Rate}$$
+% 
+% $$ \mu = \textrm{ Mean level} $$
+% 
+% $$ \sigma = \textrm { Volatility } $$
+%
+% This model can be calibrated to historical data by performing a linear 
+% regression between log prices and their first difference. Specifically,
+% the equation can be rewritten as,
+%
+% $$ \frac{\Delta x_t}{\Delta t} = - \alpha x_t + \alpha\mu + \frac{\sigma}{\Delta t} dz_t $$
+
+%% Calibrate Parameters
+% The reversion rate and mean level can be calculated from the coefficients
+% of a linear fit between the log prices and their first difference scaled
+% by the time interval parameter. All quantities are specified on an annual
+% scale. 
+x = log(S);
+dx = diff(x);
+dt = 1/261; % Time in years (261 observations per year)
+dxdt = dx/dt;
+x(end) = []; % To ensure the number of elements in x and dxdt match
+
+% Fit a linear trend to estimate mean reversion parameters
+coeff = polyfit(x, dxdt, 1);
+res = dxdt - polyval(coeff, x);
+
+revRate   = -coeff(1)
+meanLevel = coeff(2)/revRate
+vol       = std(res) * sqrt(dt)
+
+%% Create an Ornstein-Uhlenbeck mean reverting drift model
+% An Ornstein-Uhlenbeck model is a special case of a Hull-White-Vasicek 
+% model with constant volatility. The HWV constructor is used to setup an
+% SDE model with the parameters estimated above. The start state of the 
+% model is set to the last observed log spot price. This model can be
+% easily extend to accommodate the forward curve and option prices by
+% setting the meanLevel and volatility parameters to be functions of time.
+
+OUmodel = hwv(revRate, meanLevel, vol,  'StartState', x(end))
+
+% Alternatively, one could equivalently use the SDEMRD object as follows
+% OUmodel = sdemrd(revRate, meanLevel, 0, vol, 'StartState', x(end))
+
+
+%% Monte-Carlo Simulation
+% The model defined above can be simulated with the simulate method of the
+% SDE object to generate multiple log price paths. These are exponentiated
+% to compute the simulated natural gas prices. The plot below shows 100
+% paths simulated 80 days into the future.
+
+NTrials = 1000;
+NSteps  = 2000;
+
+
+Xsim = simulate(OUmodel, NSteps, 'NTrials', NTrials, 'DeltaTime', dt);
+
+
+Xsim = squeeze(Xsim); % Remove redundant dimension
+Ssim = exp(Xsim);
+
+% Visualize first 80 prices of 100 paths
+plot(data.Date(end-20:end), S(end-20:end), data.Date(end)+(0:79), Ssim(1:80,1:100));
+datetick; xlabel('Date'); ylabel('NG Spot Price');
+
+%% Save Model
+% The calibrated model is saved in a MAT-file for later use.
+
+save SavedModels\NGPriceModel OUmodel dt
+
+
+
+%% Visual Analysis of Simulated Price Paths
+% Instead of plotting a number of paths at once, we can plot longer single paths
+% against the observed historical data to visually validate the simulated
+% paths. This can serve as a final sanity check. 
+
+path = 14;
+plot(data.Date, data.NaturalGas, 'b', data.Date(end)+(0:NSteps), Ssim(:,path), 'r');
+title(['Historical & Simulated Prices, Path ' int2str(path)]);
+datetick('x','keeplimits');
+
+%% Automated Visualization for Calibration Report
+% This section creates plots of different simulations in an automated
+% fashion to include in the calibration report.
+
+NTrials = 12;
+NSteps  = 2000;
+Xsim = simulate(OUmodel, NSteps, 'NTrials', NTrials, 'DeltaTime', dt);
+Ssim = exp(Xsim);
+
+for path = 1:NTrials
+    plot(data.Date, data.NaturalGas, 'b', data.Date(end)+(0:NSteps), Ssim(:,path), 'r');
+    title(['Historical & Simulated Prices, Path ' int2str(path)]);
+    datetick
+    snapnow;
+end
+
+%#ok<*NOPTS>
+##### SOURCE END #####
+--></body></html>

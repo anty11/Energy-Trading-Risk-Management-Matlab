@@ -1,0 +1,306 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML is auto-generated from an M-file.
+To make changes, update the M-file and republish this document.
+      --><title>Simulation of Hybrid Electricity Model &amp; Economic Dispatch</title><meta name="generator" content="MATLAB 7.10"><meta name="date" content="2010-06-29"><meta name="m-file" content="SimulationDispatch"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h1>Simulation of Hybrid Electricity Model &amp; Economic Dispatch</h1><!--introduction--><p>The Natural Gas Price model, Temperature model and Electricity Price hybrid model are jointly simulated to create market scenarios. Then, given a set of plant parameters and constraints a dispatch is performed on each set of simulated price paths to compute a set of daily cash-flows for each plant for each scenario (simulated path). The expected profit from the distribution of cash-flows and the 90% and 95% cash-flow-at-risk metrics are reported</p><!--/introduction--><h2>Contents</h2><div><ul><li><a href="#1">Load Models and Data</a></li><li><a href="#2">Perform Simulation</a></li><li><a href="#3">Visualize Paths</a></li><li><a href="#4">Visualize Multiple Paths</a></li><li><a href="#5">Define Power Plant Characteristics</a></li><li><a href="#6">Compute Optimal Dispatch for Single Path</a></li><li><a href="#7">Compute Optimal Dispatch for All Paths</a></li></ul></div><h2>Load Models and Data<a name="1"></a></h2><p>Import the required models (that have already been built), any required data (holidays) and set up the simulation parameters (date range and number of trials)</p><pre class="codeinput">clear
+tempModel = load(<span class="string">'SavedModels\TemperatureModel'</span>);
+  NGModel = load(<span class="string">'SavedModels\NGPriceModel'</span>);
+elecModel = load(<span class="string">'SavedModels\ElectricityModel'</span>);
+ holidays = load(<span class="string">'SavedModels\NEholidays'</span>);
+
+startDate = <span class="string">'2010-04-16'</span>;
+  endDate = <span class="string">'2010-12-31'</span>;
+dates = (datenum(startDate):1/24:datenum(endDate)+23/24)';
+Ntrials = 500;
+</pre><h2>Perform Simulation<a name="2"></a></h2><pre class="codeinput"><span class="comment">% Simulate Temperatures</span>
+[simTemp, simTempStochastic] = simulateTemperature(tempModel, dates, Ntrials);
+
+<span class="comment">% Simulate Natural Gas</span>
+simNG = simulateNGPrices(NGModel, dates, Ntrials);
+
+<span class="comment">% Simulate Electricity</span>
+simElec = simulateElecPrices(elecModel, dates, Ntrials, simTemp, simTempStochastic, simNG, holidays.dates);
+</pre><h2>Visualize Paths<a name="3"></a></h2><p>Modify the value of variable <i>path</i> and re-run the cell to display the simulated temperatures, natural gas prices and electricity prices for one realization or path in the simulation.</p><pre class="codeinput">path = 1;
+ax1 = subplot(3,1,1);
+plot(dates, simTemp(:,path)); title(<span class="string">'Temperature'</span>);
+ax2 = subplot(3,1,2);
+plot(dates, simNG(:,path)); title(<span class="string">'Natural Gas Prices'</span>);
+ax3 = subplot(3,1,3);
+plot(dates, simElec(:,path)); title(<span class="string">'Electricity Prices'</span>);
+linkaxes([ax1 ax2 ax3],<span class="string">'x'</span>);
+dynamicDateTicks([ax1 ax2 ax3], <span class="string">'linked'</span>);
+</pre><img vspace="5" hspace="5" src="SimulationDispatch_01.png" alt=""> <h2>Visualize Multiple Paths<a name="4"></a></h2><p>Loop through and visualize paths 2 through 10 to validate the results of the model</p><pre class="codeinput"><span class="keyword">for</span> path = 2:10
+    ax1 = subplot(3,1,1);
+    plot(dates, simTemp(:,path)); title([<span class="string">'Temperature, path '</span> int2str(path)]);
+    ax2 = subplot(3,1,2);
+    plot(dates, simNG(:,path)); title(<span class="string">'Natural Gas Prices'</span>);
+    ax3 = subplot(3,1,3);
+    plot(dates, simElec(:,path)); title(<span class="string">'Electricity Prices'</span>);
+    linkaxes([ax1 ax2 ax3],<span class="string">'x'</span>);
+    dynamicDateTicks([ax1 ax2 ax3], <span class="string">'linked'</span>);
+    snapnow
+<span class="keyword">end</span>
+</pre><img vspace="5" hspace="5" src="SimulationDispatch_02.png" alt=""> <img vspace="5" hspace="5" src="SimulationDispatch_03.png" alt=""> <img vspace="5" hspace="5" src="SimulationDispatch_04.png" alt=""> <img vspace="5" hspace="5" src="SimulationDispatch_05.png" alt=""> <img vspace="5" hspace="5" src="SimulationDispatch_06.png" alt=""> <img vspace="5" hspace="5" src="SimulationDispatch_07.png" alt=""> <img vspace="5" hspace="5" src="SimulationDispatch_08.png" alt=""> <img vspace="5" hspace="5" src="SimulationDispatch_09.png" alt=""> <img vspace="5" hspace="5" src="SimulationDispatch_10.png" alt=""> <h2>Define Power Plant Characteristics<a name="5"></a></h2><p>Define the operating characteristics of a gas-fired plant. These can also be imported from the <b>PlantRisk</b> spreadsheet.</p><pre class="codeinput">capacity = 100; <span class="comment">% MW</span>
+heatRate = 8500; <span class="comment">% Btu/KWh</span>
+VOMCosts = 3; <span class="comment">% $/MWh</span>
+minRun   = 12; <span class="comment">% hrs/day</span>
+</pre><h2>Compute Optimal Dispatch for Single Path<a name="6"></a></h2><p>For a chosen simulated path, the function <i>dispatch</i> is used to compute the optimal daily dispatch decisions for the power plant and to return a series of cashflows and operational statistics. Individual cash-flows are displayed in a stem plot.</p><pre class="codeinput">path = 1;
+[profit, numOpDays, aveHrs, pctRun, earnings] = <span class="keyword">...</span>
+   dispatch(capacity, heatRate, VOMCosts, minRun, simElec(:,path), simNG(:,path));
+
+disp([<span class="string">'Path '</span> int2str(path) <span class="string">' results:'</span>]);
+fprintf(<span class="string">'Profit: $%0.4f M\nOperating Days: %d\nAverage Hours per Operating Day: %0.2f\nPercentage of Time Running: %0.2f%%\n\n\n'</span>,<span class="keyword">...</span>
+    profit/1e6, numOpDays, aveHrs, pctRun*100);
+
+figure
+stem(dates(1:24:end), earnings*capacity, <span class="string">'fill'</span>, <span class="string">'Markersize'</span>, 5, <span class="string">'Marker'</span>, <span class="string">'.'</span>);
+axis <span class="string">tight</span>; dynamicDateTicks;
+xlabel(<span class="string">'Date'</span>); ylabel(<span class="string">'Cash-flow (profit) ($)'</span>);
+title([<span class="string">'Generator cash-flows per day, path'</span> int2str(path)]);
+</pre><pre class="codeoutput">Path 1 results:
+Profit: $2.9560 M
+Operating Days: 252
+Average Hours per Operating Day: 15.25
+Percentage of Time Running: 61.59%
+
+
+</pre><img vspace="5" hspace="5" src="SimulationDispatch_11.png" alt=""> <h2>Compute Optimal Dispatch for All Paths<a name="7"></a></h2><p>The same <i>dispatch</i> function can be used to generate total profit and operation statistics for all simulated natural gas and electricity price paths. The distribution of the resulting profits or total cash-flows can be analyzed to compute expected cash-flow and cash-flow-at-risk.</p><pre class="codeinput">profit    = zeros(1,Ntrials);
+numOpDays = zeros(1,Ntrials);
+aveHrs    = zeros(1,Ntrials);
+pctRun    = zeros(1,Ntrials);
+
+<span class="keyword">for</span> path = 1:Ntrials
+    [profit(path), numOpDays(path), aveHrs(path), pctRun(path)] =<span class="keyword">...</span>
+        dispatch(capacity, heatRate, VOMCosts, minRun, simElec(:,path), simNG(:,path));
+<span class="keyword">end</span>
+
+expProfit = mean(profit);
+numOpDays = mean(numOpDays);
+aveHrs    = mean(aveHrs);
+pctRun    = mean(pctRun);
+<span class="comment">% Compute 90% and 95% Cash-flow-at-Risk</span>
+CFaR = expProfit - prctile(profit, [10 5]);
+
+disp(<span class="string">'Simulation Averages/Expectations'</span>);
+fprintf([<span class="string">'Operating Days: %0.2f\nAverage Hours per Operating Day: %0.2f\n'</span> <span class="keyword">...</span>
+    <span class="string">'Percentage of Time Running: %0.2f%%\nExpected Profit: $%0.4f M\n'</span> <span class="keyword">...</span>
+    <span class="string">'90%% Cash-flow-at-Risk: $%0.4f M\n95%% Cash-flow-at-Risk: $%0.4f M\n'</span>],<span class="keyword">...</span>
+    numOpDays, aveHrs, pctRun*100, expProfit/1e6, CFaR(1)/1e6, CFaR(2)/1e6);
+
+figure;
+nhist = max(Ntrials/30,10);
+hist(profit/1e6, nhist);
+line(expProfit*[1 1]/1e6, ylim, <span class="string">'Color'</span>, <span class="string">'g'</span>);
+line((expProfit-CFaR(1))*[1 1]/1e6, ylim, <span class="string">'Color'</span>, <span class="string">'r'</span>, <span class="string">'LineWidth'</span>, 2);
+line((expProfit-CFaR(2))*[1 1]/1e6, ylim, <span class="string">'Color'</span>, <span class="string">'m'</span>, <span class="string">'LineWidth'</span>, 2);
+legend(<span class="string">'Cash-flow Distribution'</span>, <span class="string">'Expected Profit'</span>, <span class="string">'90% CFaR'</span>, <span class="string">'95% CFaR'</span>)
+xlabel(<span class="string">'Plant Cash-flows (Millions of $)'</span>);
+ylabel(<span class="string">'Count'</span>);
+title(<span class="string">'Plant Cash-flow Distribution'</span>);
+</pre><pre class="codeoutput">Simulation Averages/Expectations
+Operating Days: 249.89
+Average Hours per Operating Day: 15.13
+Percentage of Time Running: 60.60%
+Expected Profit: $3.0910 M
+90% Cash-flow-at-Risk: $0.6186 M
+95% Cash-flow-at-Risk: $0.7209 M
+</pre><img vspace="5" hspace="5" src="SimulationDispatch_12.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.10<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Simulation of Hybrid Electricity Model & Economic Dispatch
+% The Natural Gas Price model, Temperature model and Electricity Price
+% hybrid model are jointly simulated to create market scenarios. Then,
+% given a set of plant parameters and constraints a dispatch is performed
+% on each set of simulated price paths to compute a set of daily cash-flows
+% for each plant for each scenario (simulated path). The expected profit from 
+% the distribution of cash-flows and the 90% and 95% cash-flow-at-risk
+% metrics are reported
+
+%% Load Models and Data
+% Import the required models (that have already been built), any required
+% data (holidays) and set up the simulation parameters (date range and
+% number of trials)
+
+clear
+tempModel = load('SavedModels\TemperatureModel');
+  NGModel = load('SavedModels\NGPriceModel');
+elecModel = load('SavedModels\ElectricityModel');
+ holidays = load('SavedModels\NEholidays');
+
+startDate = '2010-04-16';
+  endDate = '2010-12-31';
+dates = (datenum(startDate):1/24:datenum(endDate)+23/24)';
+Ntrials = 500;
+
+%% Perform Simulation
+
+% Simulate Temperatures
+[simTemp, simTempStochastic] = simulateTemperature(tempModel, dates, Ntrials);
+
+% Simulate Natural Gas
+simNG = simulateNGPrices(NGModel, dates, Ntrials);
+
+% Simulate Electricity
+simElec = simulateElecPrices(elecModel, dates, Ntrials, simTemp, simTempStochastic, simNG, holidays.dates);
+
+%% Visualize Paths
+% Modify the value of variable _path_ and re-run the cell to display the
+% simulated temperatures, natural gas prices and electricity prices for one
+% realization or path in the simulation.
+
+path = 1;
+ax1 = subplot(3,1,1);
+plot(dates, simTemp(:,path)); title('Temperature');
+ax2 = subplot(3,1,2);
+plot(dates, simNG(:,path)); title('Natural Gas Prices');
+ax3 = subplot(3,1,3);
+plot(dates, simElec(:,path)); title('Electricity Prices');
+linkaxes([ax1 ax2 ax3],'x');
+dynamicDateTicks([ax1 ax2 ax3], 'linked');
+
+%% Visualize Multiple Paths
+% Loop through and visualize paths 2 through 10 to validate the results of
+% the model
+
+for path = 2:10
+    ax1 = subplot(3,1,1);
+    plot(dates, simTemp(:,path)); title(['Temperature, path ' int2str(path)]);
+    ax2 = subplot(3,1,2);
+    plot(dates, simNG(:,path)); title('Natural Gas Prices');
+    ax3 = subplot(3,1,3);
+    plot(dates, simElec(:,path)); title('Electricity Prices');
+    linkaxes([ax1 ax2 ax3],'x');
+    dynamicDateTicks([ax1 ax2 ax3], 'linked');
+    snapnow
+end
+
+%% Define Power Plant Characteristics
+% Define the operating characteristics of a gas-fired plant. These can also
+% be imported from the *PlantRisk* spreadsheet.
+
+capacity = 100; % MW
+heatRate = 8500; % Btu/KWh
+VOMCosts = 3; % $/MWh
+minRun   = 12; % hrs/day
+
+%% Compute Optimal Dispatch for Single Path
+% For a chosen simulated path, the function _dispatch_ is used to compute the
+% optimal daily dispatch decisions for the power plant and to return a series
+% of cashflows and operational statistics. Individual cash-flows are
+% displayed in a stem plot.
+
+path = 1;
+[profit, numOpDays, aveHrs, pctRun, earnings] = ...
+   dispatch(capacity, heatRate, VOMCosts, minRun, simElec(:,path), simNG(:,path));
+
+disp(['Path ' int2str(path) ' results:']);
+fprintf('Profit: $%0.4f M\nOperating Days: %d\nAverage Hours per Operating Day: %0.2f\nPercentage of Time Running: %0.2f%%\n\n\n',...
+    profit/1e6, numOpDays, aveHrs, pctRun*100);
+
+figure
+stem(dates(1:24:end), earnings*capacity, 'fill', 'Markersize', 5, 'Marker', '.');
+axis tight; dynamicDateTicks;
+xlabel('Date'); ylabel('Cash-flow (profit) ($)');
+title(['Generator cash-flows per day, path' int2str(path)]);
+
+%% Compute Optimal Dispatch for All Paths
+% The same _dispatch_ function can be used to generate total profit and
+% operation statistics for all simulated natural gas and electricity
+% price paths. The distribution of the resulting profits or total cash-flows can
+% be analyzed to compute expected cash-flow and cash-flow-at-risk.
+
+profit    = zeros(1,Ntrials);
+numOpDays = zeros(1,Ntrials);
+aveHrs    = zeros(1,Ntrials);
+pctRun    = zeros(1,Ntrials);
+
+for path = 1:Ntrials
+    [profit(path), numOpDays(path), aveHrs(path), pctRun(path)] =...
+        dispatch(capacity, heatRate, VOMCosts, minRun, simElec(:,path), simNG(:,path));
+end
+
+expProfit = mean(profit);
+numOpDays = mean(numOpDays);
+aveHrs    = mean(aveHrs);
+pctRun    = mean(pctRun);
+% Compute 90% and 95% Cash-flow-at-Risk
+CFaR = expProfit - prctile(profit, [10 5]); 
+
+disp('Simulation Averages/Expectations');
+fprintf(['Operating Days: %0.2f\nAverage Hours per Operating Day: %0.2f\n' ... 
+    'Percentage of Time Running: %0.2f%%\nExpected Profit: $%0.4f M\n' ...
+    '90%% Cash-flow-at-Risk: $%0.4f M\n95%% Cash-flow-at-Risk: $%0.4f M\n'],...
+    numOpDays, aveHrs, pctRun*100, expProfit/1e6, CFaR(1)/1e6, CFaR(2)/1e6);
+
+figure;
+nhist = max(Ntrials/30,10);
+hist(profit/1e6, nhist);
+line(expProfit*[1 1]/1e6, ylim, 'Color', 'g');
+line((expProfit-CFaR(1))*[1 1]/1e6, ylim, 'Color', 'r', 'LineWidth', 2);
+line((expProfit-CFaR(2))*[1 1]/1e6, ylim, 'Color', 'm', 'LineWidth', 2);
+legend('Cash-flow Distribution', 'Expected Profit', '90% CFaR', '95% CFaR')
+xlabel('Plant Cash-flows (Millions of $)');
+ylabel('Count');
+title('Plant Cash-flow Distribution');
+##### SOURCE END #####
+--></body></html>

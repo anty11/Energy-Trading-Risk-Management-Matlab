@@ -1,0 +1,403 @@
+
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html><head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+   <!--
+This HTML is auto-generated from an M-file.
+To make changes, update the M-file and republish this document.
+      --><title>Modeling &amp; Simulating Hourly Electricity</title><meta name="generator" content="MATLAB 7.10"><meta name="date" content="2010-06-28"><meta name="m-file" content="ModelElectricity"><style type="text/css">
+
+body {
+  background-color: white;
+  margin:10px;
+}
+
+h1 {
+  color: #990000; 
+  font-size: x-large;
+}
+
+h2 {
+  color: #990000;
+  font-size: medium;
+}
+
+/* Make the text shrink to fit narrow windows, but not stretch too far in 
+wide windows. */ 
+p,h1,h2,div.content div {
+  max-width: 600px;
+  /* Hack for IE6 */
+  width: auto !important; width: 600px;
+}
+
+pre.codeinput {
+  background: #EEEEEE;
+  padding: 10px;
+}
+@media print {
+  pre.codeinput {word-wrap:break-word; width:100%;}
+} 
+
+span.keyword {color: #0000FF}
+span.comment {color: #228B22}
+span.string {color: #A020F0}
+span.untermstring {color: #B20000}
+span.syscmd {color: #B28C00}
+
+pre.codeoutput {
+  color: #666666;
+  padding: 10px;
+}
+
+pre.error {
+  color: red;
+}
+
+p.footer {
+  text-align: right;
+  font-size: xx-small;
+  font-weight: lighter;
+  font-style: italic;
+  color: gray;
+}
+
+  </style></head><body><div class="content"><h1>Modeling &amp; Simulating Hourly Electricity</h1><!--introduction--><p>This example demonstrates fitting a non-linear regression tree model to hourly day-ahead electricity prices in the New England pool region. The log electricity prices are modeled with two additive components: a deterministic and stochastic component. The deterministic component takes into account observed electricity price changes due to changes in fuel (natural gas) prices, the daily temperature, the hour of the day, day of the week and holidays. This is modeled using a regression tree. The stochastic component is modeled as a seasonal AR process with heavy tailed innovations.</p><p>Note: Regression trees are known to be weak learners which can very easily overfit the data. While we do not address this issue in this demo, you may want to use out-of-sample cross-validation to prune the tree to balance accuracy of a training and test set. This can be done manually by using a separate subset of the data to build the model and a different subset to test its accuracy or by using a function such as CROSSVAL in Statistics Toolbox</p><!--/introduction--><h2>Contents</h2><div><ul><li><a href="#1">Import Data</a></li><li><a href="#3">Plot Prices</a></li><li><a href="#4">Remove outliers and convert to Log scale</a></li><li><a href="#5">Create Predictor Matrix</a></li><li><a href="#6">Build Regression Tree Model</a></li><li><a href="#7">Compute &amp; Visualize Model Performance</a></li><li><a href="#8">Analyze Serial Correlation in Residuals</a></li><li><a href="#9">Modeling the Stochastic Component with a seasonal AR model</a></li><li><a href="#10">Analyze Residuals of Regression for Serial Correlation</a></li><li><a href="#11">Fit a Distribution to Residuals</a></li><li><a href="#12">Compare Pareto Tail Fit to Student's-t fit</a></li><li><a href="#13">Summary of model</a></li><li><a href="#14">Simulate model</a></li></ul></div><h2>Import Data<a name="1"></a></h2><p>Data is loaded from a previously created MAT-file. The series consist of a vector of serial dates and the corresponding historical recorded temperature.</p><pre class="codeinput">clear
+load <span class="string">Data\ElecSeries</span>
+whos
+</pre><pre class="codeoutput">  Name                 Size             Bytes  Class     Attributes
+
+  Date             52608x1             420864  double              
+  ElecPrice        52608x1             420864  double              
+  Hour             52608x1             420864  double              
+  NGPrice          52608x1             420864  double              
+  Temperature      52608x1             420864  double              
+
+</pre><p>Also import a list of local holidays that span the dataset. These are read from an Excel spreadsheet. One can also use Financial Toolbox functions like HOLIDAYS, ISBUSDAY etc. to automatically generate holidays within the time range.</p><pre class="codeinput">[numData, holidays] = xlsread(<span class="string">'Data\Holidays.xls'</span>);
+holidays = holidays(2:end,1);
+disp(<span class="string">'Sample Holidays'</span>)
+disp(holidays(1:20))
+</pre><pre class="codeoutput">Sample Holidays
+    '1/1/2004'
+    '1/19/2004'
+    '2/16/2004'
+    '5/31/2004'
+    '7/5/2004'
+    '9/6/2004'
+    '11/25/2004'
+    '11/26/2004'
+    '12/24/2004'
+    '12/31/2004'
+    '1/17/2005'
+    '2/21/2005'
+    '5/30/2005'
+    '7/4/2005'
+    '9/5/2005'
+    '11/24/2005'
+    '11/25/2005'
+    '12/26/2005'
+    '1/2/2006'
+    '1/16/2006'
+
+</pre><h2>Plot Prices<a name="3"></a></h2><p>Create a visualization of the electricity prices from a macro and micro perspective</p><pre class="codeinput">subplot(2,1,1);
+plot(Date, ElecPrice); dynamicDateTicks;
+ylabel(<span class="string">'$/MWh'</span>); title(<span class="string">'Electricity Prices'</span>);
+subplot(2,1,2);
+dateind = Date &gt; datenum(<span class="string">'July 2, 2006'</span>) &amp; Date &lt; datenum(<span class="string">'Aug 13, 2006'</span>);
+plot(Date(dateind), ElecPrice(dateind)); dynamicDateTicks;
+ylabel(<span class="string">'$/MWh'</span>); title(<span class="string">'Electricity Prices from July 2, 2006 to Aug 13, 2006'</span>);
+</pre><img vspace="5" hspace="5" src="ModelElectricity_01.png" alt=""> <h2>Remove outliers and convert to Log scale<a name="4"></a></h2><p>There are 5 instances in the data where an electricity price of 0 is reported while the hours before and after are fairly high. These data points correspond to daylight savings time transitions. These data points will be removed and replaced with interpolated values from neighboring hours.</p><pre class="codeinput">ind = ElecPrice==0;
+ElecPrice(ind) = interp1(find(~ind), ElecPrice(~ind), find(ind));
+logPrice = log(ElecPrice);
+</pre><h2>Create Predictor Matrix<a name="5"></a></h2><p>The deterministic component of the model will take into account the relationship between electricity prices and natural gas prices, temperatures, hour of the day, day of the week and holidays. Therefore we generate a matrix of these predictors for every observation. These predictors include,</p><div><ul><li>Temperature &amp; Deviation from seasonal average (the stochastic component of temperature)</li><li>Hour of day, Day of Week</li><li>Logical indicator if it is a holiday</li><li>NG spot price, previous day price and previous week price</li></ul></div><pre class="codeinput">[X, labels] = genPredictorsElec(Date, Hour, holidays, NGPrice, Temperature);
+disp(labels');
+</pre><pre class="codeoutput">    'Temp'
+    'TempDeviation'
+    'Hour'
+    'Weekday'
+    'IsWorkingDay'
+    'NGPrice'
+    'PrevDayNG'
+    'PrevWeekNG'
+
+</pre><h2>Build Regression Tree Model<a name="6"></a></h2><p>Build a regression tree to model electricity prices given predictors. Visualize a highly-pruned small subset of the tree.</p><p>Note: Regression trees can easily overfit a training set. See the text at the start of this example for more information on how to avoid these pitfalls.</p><pre class="codeinput">model = classregtree(X, logPrice, <span class="string">'names'</span>, labels, <span class="string">'Categorical'</span>, 5);
+
+subsettree = prune(model, 8660);
+view(subsettree)
+</pre><img vspace="5" hspace="5" src="ModelElectricity_02.png" alt=""> <h2>Compute &amp; Visualize Model Performance<a name="7"></a></h2><p>Predict electricity prices using the model and compare them with the observed prices. The visualization function here is the same function used in the comparison of predicted and actual values for the Temperature model. The mean absolute error (MAE) is also displayed.</p><pre class="codeinput">pred = model(X);
+res = logPrice - pred;
+
+fitPlot(Date, [logPrice pred], res);
+
+disp([<span class="string">'Mean Absolute Error (in original units, not log units): $'</span> num2str(mean(abs(exp(res))))]);
+disp([<span class="string">'Mean Absolute Percent Error (in original units): '</span> num2str(mean(abs(exp(res)./ElecPrice*100))) <span class="string">'%'</span>]);
+</pre><pre class="codeoutput">Mean Absolute Error (in original units, not log units): $1.0013
+Mean Absolute Percent Error (in original units): 1.8097%
+</pre><img vspace="5" hspace="5" src="ModelElectricity_03.png" alt=""> <h2>Analyze Serial Correlation in Residuals<a name="8"></a></h2><p>The residuals, though fairly detrended may still have some serial correlation. This can be tested with autocorrelation plots</p><pre class="codeinput">figure;
+autocorr(res,50);
+title(<span class="string">'Serial Correlation of Stochastic series'</span>);
+</pre><img vspace="5" hspace="5" src="ModelElectricity_04.png" alt=""> <h2>Modeling the Stochastic Component with a seasonal AR model<a name="9"></a></h2><p>One could choose to model the random component a mean reverting drift SDE. However, because of the seasonality, we will use an auto-regressive model with seasonal lags. As can be seen from the above plot, there is a strong seasonal correlation on an hourly and daily scale. Therefore we use lags at 1-4 hours and 1-2 days</p><pre class="codeinput">lags = [1 2 3 4 23 24 25 48];
+Xres = lagmatrix(res, lags);
+[beta, betaci, res2] = regress(res, Xres);
+disp(<span class="string">'Lags Coefficients and Confidence Intervals'</span>);
+disp([lags' beta betaci])
+</pre><pre class="codeoutput">Lags Coefficients and Confidence Intervals
+            1       0.2166      0.20808      0.22513
+            2     0.014596    0.0059255     0.023267
+            3    -0.013615    -0.022286   -0.0049433
+            4     0.010699    0.0022214     0.019177
+           23   -0.0052525    -0.013733    0.0032281
+           24      0.10719     0.098466      0.11591
+           25     -0.03629     -0.04482    -0.027761
+           48     0.062103     0.053776     0.070429
+
+</pre><h2>Analyze Residuals of Regression for Serial Correlation<a name="10"></a></h2><p>The residuals from the regression should now be mostly serially uncorrelated.</p><pre class="codeinput">figure;
+subplot(2,1,1);
+plot(Date,res2);
+dynamicDateTicks;
+title(<span class="string">'Final Residuals'</span>);
+subplot(2,1,2);
+autocorr(res2(lags(end)+1:end),50);
+title(<span class="string">'Serial Correlation of Regresison Residuals'</span>);
+</pre><img vspace="5" hspace="5" src="ModelElectricity_05.png" alt=""> <h2>Fit a Distribution to Residuals<a name="11"></a></h2><p>Since the residuals are mostly uncorrelated, they can be modeled as independent draws from an appropriate distribution. However the residuals may have fatter tails (spiky behavior) than a students-t distribution can model. Therefore, a piecewise distribution such as a pareto tail distribution may be more appropriate. The paretotails distribution uses a non-parametric distribution for the middle 80% of the data and pareto distribution for the bottom and upper 5% tails of the data.</p><pre class="codeinput">PD = paretotails(res2, .05, .95)
+</pre><pre class="codeoutput">
+PD = 
+
+Piecewise distribution with 3 segments
+        -Inf &lt; x &lt; -0.0738046     (0 &lt; p &lt; 0.05): lower tail, GPD(0.142446,0.0341202)
+   -0.0738046 &lt; x &lt; 0.0755481  (0.05 &lt; p &lt; 0.95): interpolated empirical cdf
+          0.0755481 &lt; x &lt; Inf     (0.95 &lt; p &lt; 1): upper tail, GPD(0.170516,0.0338455)
+
+
+</pre><h2>Compare Pareto Tail Fit to Student's-t fit<a name="12"></a></h2><p>Notice how the pareto tail model is better able to match the empirical CDF of the residuals.</p><pre class="codeinput">PDt = fitdist(res2, <span class="string">'tlocationscale'</span>);
+
+figure;
+probplot(res2);
+h = probplot(gca, PDt); set(h,<span class="string">'Color'</span>, <span class="string">'g'</span>);
+h = probplot(gca, @PD.cdf);  set(h,<span class="string">'Color'</span>, <span class="string">'r'</span>);
+legend(<span class="string">'Normal Distribution'</span>, <span class="string">'Data'</span>, <span class="string">'T-Location Scale'</span>, <span class="string">'Pareto Tails'</span>, <span class="string">'location'</span>, <span class="string">'best'</span>);
+title (<span class="string">'Comparison of T and Pareto Tail CDF'</span>)
+</pre><img vspace="5" hspace="5" src="ModelElectricity_06.png" alt=""> <h2>Summary of model<a name="13"></a></h2><p>The electricity model can now be defined by,</p><div><ul><li>The regression tree "model"</li><li>Regression parameters "beta"</li><li>Autocorrelation lags "lags"</li><li>The residual probability distribution "PD"</li><li>Optional presample data (the last observations of temperature for regression)</li></ul></div><pre class="codeinput">elecModel = struct(<span class="string">'treemodel'</span>, model, <span class="string">'reglags'</span>, lags, <span class="string">'regbeta'</span>, beta, <span class="string">'dist'</span>, PD, <span class="string">'presample'</span>, res(end-lags(end)+1:end))
+save <span class="string">SavedModels\ElectricityModel</span> <span class="string">-struct</span> <span class="string">elecModel</span>
+clearvars <span class="string">-except</span> <span class="string">elecModel</span> <span class="string">Date</span> <span class="string">X</span> <span class="string">holidays</span> <span class="string">ElecPrice</span>
+</pre><pre class="codeoutput">
+elecModel = 
+
+    treemodel: [1x1 classregtree]
+      reglags: [1 2 3 4 23 24 25 48]
+      regbeta: [8x1 double]
+         dist: [1x1 paretotails]
+    presample: [48x1 double]
+
+</pre><h2>Simulate model<a name="14"></a></h2><p>We can now simulate this model for 2009 and compare the simulated values to the observed data for 2009. Note that this is only simulating the electricity prices. The temperature and natural gas are constant. Therefore the large scale shape of the prices which is mostly determined by the deterministic component stays constant with smaller local variations with each trial.</p><pre class="codeinput">indx = length(Date)-365*24+1:length(Date);
+newDates = Date(indx);
+simElec = simulateElecPrices(elecModel, newDates, 1, X(indx,1), X(indx,2), X(indx,6), holidays);
+
+<span class="comment">% Plot simulation results</span>
+ax1 = subplot(2,1,1);
+plot(newDates, ElecPrice(end-365*24+1:end))
+title(<span class="string">'Actual Electricity Prices'</span>);
+ax2 = subplot(2,1,2);
+plot(newDates, simElec);
+title(<span class="string">'Simulated Electricity Prices'</span>);
+linkaxes([ax1 ax2], <span class="string">'x'</span>);
+dynamicDateTicks([ax1 ax2], <span class="string">'linked'</span>);
+</pre><img vspace="5" hspace="5" src="ModelElectricity_07.png" alt=""> <p class="footer"><br>
+      Published with MATLAB&reg; 7.10<br></p></div><!--
+##### SOURCE BEGIN #####
+%% Modeling & Simulating Hourly Electricity
+% This example demonstrates fitting a non-linear regression tree model to
+% hourly day-ahead electricity prices in the New England pool region. The
+% log electricity prices are modeled with two additive components: a
+% deterministic and stochastic component. The deterministic component takes
+% into account observed electricity price changes due to changes in fuel
+% (natural gas) prices, the daily temperature, the hour of the day, day of
+% the week and holidays. This is modeled using a regression tree. The
+% stochastic component is modeled as a seasonal AR process with heavy
+% tailed innovations. 
+%
+% Note: Regression trees are known to be weak learners which can very
+% easily overfit the data. While we do not address this issue in this demo,
+% you may want to use out-of-sample cross-validation to prune the tree to
+% balance accuracy of a training and test set. This can be done manually by
+% using a separate subset of the data to build the model and a different
+% subset to test its accuracy or by using a function such as CROSSVAL in
+% Statistics Toolbox
+
+%% Import Data
+% Data is loaded from a previously created MAT-file. The series consist of
+% a vector of serial dates and the corresponding historical recorded
+% temperature. 
+
+clear
+load Data\ElecSeries
+whos
+
+%% 
+% Also import a list of local holidays that span the dataset. These are
+% read from an Excel spreadsheet. One can also use Financial Toolbox
+% functions like HOLIDAYS, ISBUSDAY etc. to automatically generate holidays
+% within the time range.
+
+[numData, holidays] = xlsread('Data\Holidays.xls');
+holidays = holidays(2:end,1);
+disp('Sample Holidays')
+disp(holidays(1:20))
+
+%% Plot Prices
+% Create a visualization of the electricity prices from a macro and micro
+% perspective
+subplot(2,1,1);
+plot(Date, ElecPrice); dynamicDateTicks; 
+ylabel('$/MWh'); title('Electricity Prices');
+subplot(2,1,2);
+dateind = Date > datenum('July 2, 2006') & Date < datenum('Aug 13, 2006');
+plot(Date(dateind), ElecPrice(dateind)); dynamicDateTicks; 
+ylabel('$/MWh'); title('Electricity Prices from July 2, 2006 to Aug 13, 2006');
+
+%% Remove outliers and convert to Log scale
+% There are 5 instances in the data where an electricity price of 0 is
+% reported while the hours before and after are fairly high. These data
+% points correspond to daylight savings time transitions. These data points 
+% will be removed and replaced with interpolated values from neighboring hours.
+ind = ElecPrice==0;
+ElecPrice(ind) = interp1(find(~ind), ElecPrice(~ind), find(ind));
+logPrice = log(ElecPrice);
+
+%% Create Predictor Matrix
+% The deterministic component of the model will take into account the
+% relationship between electricity prices and natural gas prices,
+% temperatures, hour of the day, day of the week and holidays. Therefore we
+% generate a matrix of these predictors for every observation. These
+% predictors include,
+% 
+% * Temperature & Deviation from seasonal average (the stochastic component of temperature)
+% * Hour of day, Day of Week
+% * Logical indicator if it is a holiday
+% * NG spot price, previous day price and previous week price
+
+[X, labels] = genPredictorsElec(Date, Hour, holidays, NGPrice, Temperature);
+disp(labels');
+
+%% Build Regression Tree Model
+% Build a regression tree to model electricity prices given predictors.
+% Visualize a highly-pruned small subset of the tree.
+%
+% Note: Regression trees can easily overfit a training set. See the text at
+% the start of this example for more information on how to avoid these
+% pitfalls.
+
+model = classregtree(X, logPrice, 'names', labels, 'Categorical', 5);
+
+subsettree = prune(model, 8660);
+view(subsettree)
+
+%% Compute & Visualize Model Performance
+% Predict electricity prices using the model and compare them with the
+% observed prices. The visualization function here is the same function
+% used in the comparison of predicted and actual values for the Temperature
+% model. The mean absolute error (MAE) is also displayed.
+
+pred = model(X);
+res = logPrice - pred;
+
+fitPlot(Date, [logPrice pred], res);
+
+disp(['Mean Absolute Error (in original units, not log units): $' num2str(mean(abs(exp(res))))]);
+disp(['Mean Absolute Percent Error (in original units): ' num2str(mean(abs(exp(res)./ElecPrice*100))) '%']);
+
+%% Analyze Serial Correlation in Residuals
+% The residuals, though fairly detrended may still have some serial
+% correlation. This can be tested with autocorrelation plots
+
+figure;
+autocorr(res,50);
+title('Serial Correlation of Stochastic series');
+
+%% Modeling the Stochastic Component with a seasonal AR model
+% One could choose to model the random component a mean reverting drift
+% SDE. However, because of the seasonality, we will use an auto-regressive
+% model with seasonal lags. As can be seen from the above plot, there is a 
+% strong seasonal correlation on an hourly and daily scale. Therefore we
+% use lags at 1-4 hours and 1-2 days
+
+lags = [1 2 3 4 23 24 25 48];
+Xres = lagmatrix(res, lags);
+[beta, betaci, res2] = regress(res, Xres);
+disp('Lags Coefficients and Confidence Intervals');
+disp([lags' beta betaci])
+
+%% Analyze Residuals of Regression for Serial Correlation
+% The residuals from the regression should now be mostly serially
+% uncorrelated. 
+figure;
+subplot(2,1,1);
+plot(Date,res2);
+dynamicDateTicks;
+title('Final Residuals');
+subplot(2,1,2);
+autocorr(res2(lags(end)+1:end),50);
+title('Serial Correlation of Regresison Residuals');
+
+%% Fit a Distribution to Residuals
+% Since the residuals are mostly uncorrelated, they can be modeled as
+% independent draws from an appropriate distribution. However the residuals
+% may have fatter tails (spiky behavior) than a students-t distribution can model.
+% Therefore, a piecewise distribution such as a pareto tail distribution
+% may be more appropriate. The paretotails distribution uses a
+% non-parametric distribution for the middle 80% of the data and pareto
+% distribution for the bottom and upper 5% tails of the data.
+
+PD = paretotails(res2, .05, .95)
+
+%% Compare Pareto Tail Fit to Student's-t fit
+% Notice how the pareto tail model is better able to match the empirical
+% CDF of the residuals.
+
+PDt = fitdist(res2, 'tlocationscale');
+
+figure;
+probplot(res2);
+h = probplot(gca, PDt); set(h,'Color', 'g');
+h = probplot(gca, @PD.cdf);  set(h,'Color', 'r');
+legend('Normal Distribution', 'Data', 'T-Location Scale', 'Pareto Tails', 'location', 'best');
+title ('Comparison of T and Pareto Tail CDF')
+
+%% Summary of model
+% The electricity model can now be defined by,
+% 
+% * The regression tree "model"
+% * Regression parameters "beta"
+% * Autocorrelation lags "lags"
+% * The residual probability distribution "PD"
+% * Optional presample data (the last observations of temperature for regression)
+
+elecModel = struct('treemodel', model, 'reglags', lags, 'regbeta', beta, 'dist', PD, 'presample', res(end-lags(end)+1:end))
+save SavedModels\ElectricityModel -struct elecModel
+clearvars -except elecModel Date X holidays ElecPrice
+
+%% Simulate model
+% We can now simulate this model for 2009 and compare the simulated values
+% to the observed data for 2009. Note that this is only simulating the
+% electricity prices. The temperature and natural gas are constant.
+% Therefore the large scale shape of the prices which is mostly determined by the
+% deterministic component stays constant with smaller local variations with
+% each trial. 
+
+indx = length(Date)-365*24+1:length(Date);
+newDates = Date(indx);
+simElec = simulateElecPrices(elecModel, newDates, 1, X(indx,1), X(indx,2), X(indx,6), holidays);
+
+% Plot simulation results
+ax1 = subplot(2,1,1);
+plot(newDates, ElecPrice(end-365*24+1:end))
+title('Actual Electricity Prices');
+ax2 = subplot(2,1,2);
+plot(newDates, simElec);
+title('Simulated Electricity Prices');
+linkaxes([ax1 ax2], 'x');
+dynamicDateTicks([ax1 ax2], 'linked');
+
+
+##### SOURCE END #####
+--></body></html>
